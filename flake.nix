@@ -3,11 +3,13 @@
 
   outputs = { self, nixpkgs }: {
 
-    devShell.x86_64-linux =
+    defaultPackage.x86_64-linux =
       with import nixpkgs { system = "x86_64-linux"; };
       stdenv.mkDerivation {
         name = "dhdm";
         buildInputs = [ mesa_glu glew glfw libpng glm fmt ];
+        src = self;
+        installPhase = "mkdir -p $out/bin; cp dhdm $out/bin/";
       };
 
   };
