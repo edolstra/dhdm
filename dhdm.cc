@@ -391,7 +391,8 @@ void Mesh::subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dh
     UV * srcFVarUV = uvbuffer.data();
 
     for (unsigned int lvl = 1; lvl <= level; ++lvl) {
-        std::cerr << fmt::format("  Applying edits on level {}...\n", lvl);
+        if (!dhdms.empty())
+            std::cerr << fmt::format("  Applying edits on level {}...\n", lvl);
 
         auto nverts = refiner->GetLevel(lvl).GetNumVertices();
 
@@ -455,18 +456,6 @@ void Mesh::subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dh
             vs.push_back({ .vertex = (VertexId) verts[i], .uv = (UvId) vuvs[i] });
         faces.push_back({ .vertices = std::move(vs) });
     }
-
-    #if 0
-    {
-        Far::TopologyLevel const & refLastLevel = refiner->GetLevel(level);
-
-        auto nverts = refLastLevel.GetNumVertices();
-        auto nfaces = refLastLevel.GetNumFaces();
-
-        auto firstOfLastVerts = vbuffer.size() - nverts;
-
-    }
-    #endif
 }
 
 Mesh Mesh::fromObj(const std::string & path)
@@ -770,8 +759,8 @@ MeshDiff diffMeshes(
             });
     }
 
-    std::cerr << "maximum displacement: " << maxDispl << "\n";
-    std::cerr << "maximum pixel component value: " << (maxDispl * scale + 0.5) * 255.0 << "\n";
+    std::cerr << "Maximum displacement: " << maxDispl << "\n";
+    std::cerr << "Maximum pixel component value: " << (maxDispl * scale + 0.5) * 255.0 << "\n";
 
     return diff;
 }
@@ -946,7 +935,7 @@ void writeDiff(const MeshDiff & diff, const std::string & outPrefix)
 
         /* Write the PNG. */
         auto outFile = fmt::format("{}-{}.png", outPrefix, tile);
-        std::cerr << fmt::format("writing '{}'...\n", outFile);
+        std::cerr << fmt::format("Writing '{}'...\n", outFile);
 
         auto fp = fopen(outFile.c_str(), "wb");
         assert(fp);
