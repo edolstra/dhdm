@@ -312,6 +312,7 @@ void Mesh::subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dh
 
     Sdc::Options options;
     options.SetVtxBoundaryInterpolation(Sdc::Options::VTX_BOUNDARY_EDGE_ONLY);
+    options.SetFVarLinearInterpolation(Sdc::Options::FVAR_LINEAR_CORNERS_ONLY);
 
     std::vector<int> vertsPerFace;
     std::vector<int> vertIndices;
