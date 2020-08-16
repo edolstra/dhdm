@@ -19,9 +19,240 @@
 
 #include <png.h>
 
+#include <nlohmann/json.hpp>
+
+#include <opensubdiv/far/topologyDescriptor.h>
+#include <opensubdiv/far/primvarRefiner.h>
+#include <opensubdiv/far/stencilTable.h>
+#include <opensubdiv/far/stencilTableFactory.h>
+
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
+
+struct Dhdm
+{
+    std::string contents;
+
+    uint32_t nr_faces = 0;
+
+    struct Level
+    {
+        uint32_t level;
+        uint32_t nrDisplacements;
+        std::string_view data;
+
+        struct Displacement
+        {
+            uint32_t faceIdx;
+            uint32_t subfaceIdx;
+            unsigned char vertexIdx;
+            float x, y, z;
+        };
+
+        struct Iterator
+        {
+            uint32_t level;
+            uint32_t nrLeft;
+            std::string_view data;
+            uint32_t curFaceIdx = 0;
+            uint32_t verticesLeft = 0;
+
+            bool operator !=(const Iterator & other) const
+            {
+                return nrLeft != other.nrLeft;
+            }
+
+            Displacement operator *()
+            {
+                assert(nrLeft);
+
+                if (!verticesLeft) {
+                    struct Header
+                    {
+                        uint32_t faceIdx;
+                        uint32_t vertices;
+                    };
+
+                    if (data.size() < sizeof(Header))
+                        throw std::runtime_error("missing face header");
+
+                    auto header = (Header *) data.data();
+                    curFaceIdx = header->faceIdx;
+                    verticesLeft = header->vertices;
+                    assert(verticesLeft);
+
+                    data = data.substr(sizeof(Header));
+                }
+
+                verticesLeft--;
+
+                Displacement displ { .faceIdx = curFaceIdx };
+                uint32_t idx;
+
+                if (level < 4) {
+                    struct Item
+                    {
+                        float x;
+                        uint8_t b1;
+                        uint8_t b2;
+                        float y;
+                        float z;
+                    } __attribute__((packed));
+
+                    static_assert(sizeof(Item) == 14);
+
+                    if (data.size() < sizeof(Item))
+                        throw std::runtime_error("missing item");
+
+                    auto item = (Item *) data.data();
+                    data = data.substr(sizeof(Item));
+
+                    assert(item->b2 == (level + 1) * 16);
+
+                    displ.x = item->x;
+                    displ.y = item->y;
+                    displ.z = item->z;
+                    idx = ((uint32_t) item->b1) << 8;
+                } else {
+                    struct Item
+                    {
+                        float x;
+                        uint8_t b1;
+                        uint8_t b2;
+                        uint8_t b3;
+                        uint8_t b4;
+                        float y;
+                        float z;
+                    } __attribute__((packed));
+
+                    static_assert(sizeof(Item) == 16);
+
+                    if (data.size() < sizeof(Item))
+                        throw std::runtime_error("missing item");
+
+                    auto item = (Item *) data.data();
+                    data = data.substr(sizeof(Item));
+
+                    assert(item->b1 == 0);
+                    assert(item->b4 == (level + 1) * 16);
+
+                    displ.x = item->x;
+                    displ.y = item->y;
+                    displ.z = item->z;
+                    idx = ((uint32_t) item->b3) << 8 | ((uint32_t) item->b2);
+                }
+
+                displ.subfaceIdx = idx >> (16 - level * 2);
+                displ.vertexIdx = (idx >> (14 - level * 2)) & 3;
+
+                return displ;
+            }
+
+            void operator ++()
+            {
+                assert(nrLeft);
+                nrLeft--;
+            }
+        };
+
+        Iterator begin()
+        {
+            return {.level = level, .nrLeft = nrDisplacements, .data = data};
+        }
+
+        Iterator end()
+        {
+            return {.nrLeft = 0};
+        }
+    };
+
+    std::vector<Level> levels;
+
+    static constexpr uint32_t MAGIC1 = 0xd0d0d0d0;
+    static constexpr uint32_t MAGIC2 = 0x3f800000;
+
+    Dhdm(const std::string & path);
+};
+
+Dhdm::Dhdm(const std::string & path)
+{
+    std::cerr << fmt::format("Parsing '{}'...\n", path);
+
+    std::ifstream fs(path, std::ios::binary);
+    if (!fs) throw std::runtime_error("cannot open file");
+
+    contents = std::string(std::istreambuf_iterator<char>(fs), {});
+    if (!fs) throw std::runtime_error("cannot read file");
+
+    struct FileHeader
+    {
+        uint32_t magic1;
+        uint32_t nr_levels;
+        uint32_t magic2;
+        uint32_t nr_levels2;
+    };
+
+    if (contents.size() < sizeof(FileHeader))
+        throw std::runtime_error("missing file header");
+
+    auto header = (FileHeader *) contents.data();
+
+    if (header->magic1 != MAGIC1 || header->magic2 != MAGIC2)
+        throw std::runtime_error("invalid magic");
+
+    if (header->nr_levels != header->nr_levels2)
+        throw std::runtime_error("inconsistent number of levels");
+
+    size_t pos = sizeof(FileHeader);
+
+    struct LevelHeader
+    {
+        uint32_t nr_faces;
+        uint32_t level;
+        uint32_t nrDisplacements;
+        uint32_t size;
+    };
+
+    for (uint32_t level = 1; level <= header->nr_levels; ++level) {
+        if (contents.size() < pos + sizeof(LevelHeader))
+            throw std::runtime_error("missing level header");
+
+        auto lheader = (LevelHeader *) (contents.data() + pos);
+        pos += 16;
+
+        std::cerr << fmt::format("  Level {}: {} displacements\n", lheader->level, lheader->nrDisplacements);
+
+        if (level != lheader->level)
+            throw std::runtime_error("wrong level header");
+
+        if (nr_faces && nr_faces != lheader->nr_faces)
+            throw std::runtime_error("inconsistent number of faces");
+
+        if (contents.size() < pos + sizeof(lheader->size))
+            throw std::runtime_error("missing level data");
+
+        levels.push_back(Level {
+            .level = level,
+            .nrDisplacements = lheader->nrDisplacements,
+            .data = std::string_view(contents).substr(pos, lheader->size)
+        });
+
+        pos += lheader->size;
+    }
+}
+
 struct Vertex
 {
     glm::dvec3 pos;
+
+    // Interfaces expected by OSD.
+    void Clear(void * = nullptr) {
+        pos = {0.0, 0.0, 0.0};
+    }
+
+    void AddWithWeight(Vertex const & src, float weight) {
+        pos += src.pos * (double) weight;
+    }
 };
 
 typedef uint32_t VertexId;
@@ -57,14 +288,187 @@ struct Mesh
             face.vertices.pop_back();
         }
     }
+
+    void subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dhdms = {});
+
+    static Mesh fromObj(const std::string & path);
+
+    void writeObj(std::ostream & str);
+
+    static Mesh fromDSF(const std::string & geoFile, const std::string & uvFile);
 };
 
-double sqr(double x)
+void Mesh::subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dhdms)
 {
-    return x * x;
+    if (level == 0) return;
+
+    std::cerr << fmt::format("Subdividing to level {}...\n", level);
+
+    using namespace OpenSubdiv;
+
+    typedef Far::TopologyDescriptor Descriptor;
+
+    Sdc::SchemeType type = OpenSubdiv::Sdc::SCHEME_CATMARK;
+
+    Sdc::Options options;
+    options.SetVtxBoundaryInterpolation(Sdc::Options::VTX_BOUNDARY_EDGE_ONLY);
+
+    std::vector<int> vertsPerFace;
+    std::vector<int> vertIndices;
+    std::vector<int> uvIndices;
+    std::vector<glm::dmat3x3> mats;
+
+    for (auto & face : faces) {
+        vertsPerFace.push_back(face.vertices.size());
+        for (auto & vert : face.vertices) {
+            vertIndices.push_back(vert.vertex);
+            uvIndices.push_back(vert.uv);
+        }
+
+        assert(face.vertices.size() == 4);
+
+        auto x_axis = glm::normalize(vertices[face.vertices[3].vertex].pos - vertices[face.vertices[0].vertex].pos);
+        auto z_axis = glm::normalize(vertices[face.vertices[1].vertex].pos - vertices[face.vertices[0].vertex].pos);
+        auto y_axis = -glm::normalize(glm::cross(x_axis, z_axis));
+        mats.push_back(glm::dmat3x3(x_axis, y_axis, z_axis));
+    }
+
+    Descriptor::FVarChannel uvChannel;
+    uvChannel.numValues = uvs.size();
+    uvChannel.valueIndices = uvIndices.data();
+
+    Descriptor desc;
+    desc.numVertices = vertices.size();
+    desc.numFaces = faces.size();
+    desc.numVertsPerFace = vertsPerFace.data();
+    desc.vertIndicesPerFace = vertIndices.data();
+    desc.numFVarChannels = 1;
+    desc.fvarChannels = &uvChannel;
+
+    std::unique_ptr<Far::TopologyRefiner> refiner(
+        Far::TopologyRefinerFactory<Descriptor>::Create(desc,
+            Far::TopologyRefinerFactory<Descriptor>::Options(type, options)));
+
+    {
+        Far::TopologyRefiner::UniformOptions refineOptions(level);
+        refineOptions.fullTopologyInLastLevel = true;
+        refiner->RefineUniform(refineOptions);
+    }
+
+    Far::StencilTableFactory::Options stencilOptions;
+    stencilOptions.generateIntermediateLevels = true;
+    stencilOptions.factorizeIntermediateLevels = false;
+    stencilOptions.generateOffsets = true;
+
+    std::unique_ptr<const Far::StencilTable> stencilTable(
+        Far::StencilTableFactory::Create(*refiner, stencilOptions));
+
+    std::vector<Vertex> vbuffer(refiner->GetNumVerticesTotal() - vertices.size());
+
+    struct UV
+    {
+        glm::dvec2 uv;
+
+        // Interfaces expected by OSD.
+        void Clear(void * = nullptr) {
+            uv = {0.0, 0.0};
+        }
+
+        void AddWithWeight(UV const & src, float weight) {
+            uv += src.uv * (double) weight;
+        }
+    };
+
+    std::vector<UV> uvbuffer(refiner->GetNumFVarValuesTotal(0));
+    assert(uvs.size() < uvbuffer.size());
+    for (size_t i = 0; i < uvs.size(); ++i)
+        uvbuffer[i].uv = uvs[i];
+
+    Far::PrimvarRefiner primvarRefiner(*refiner);
+
+    unsigned int start = 0, end = 0;
+    UV * srcFVarUV = uvbuffer.data();
+
+    for (unsigned int lvl = 1; lvl <= level; ++lvl) {
+        std::cerr << fmt::format("  Applying edits on level {}...\n", lvl);
+
+        auto nverts = refiner->GetLevel(lvl).GetNumVertices();
+
+        auto srcVerts = vertices.data();
+        if (lvl > 1) {
+             srcVerts = &vbuffer[start];
+        }
+
+        start = end;
+        end += nverts;
+
+        stencilTable->UpdateValues(srcVerts, vbuffer.data(), start, end);
+
+        const auto & curLevel = refiner->GetLevel(lvl);
+        uint32_t nrSubfaces = curLevel.GetNumFaces();
+
+        for (auto & [weight, edits] : dhdms) {
+            if (lvl <= edits.levels.size()) {
+                for (auto displ : edits.levels[lvl - 1]) {
+                    auto subfaceIdx = displ.faceIdx * (1 << (lvl * 2)) + displ.subfaceIdx;
+                    assert(subfaceIdx < nrSubfaces);
+                    auto fverts = curLevel.GetFaceVertices(subfaceIdx);
+                    assert(displ.vertexIdx < fverts.size());
+                    auto vertexIdx = fverts[displ.vertexIdx] + start;
+                    assert(vertexIdx < vbuffer.size());
+                    vbuffer[vertexIdx].pos += weight * mats[displ.faceIdx] * glm::dvec3(displ.x, displ.y, displ.z);
+                }
+            }
+        }
+
+        auto dstFVarUV = srcFVarUV + refiner->GetLevel(lvl - 1).GetNumFVarValues(0);
+        primvarRefiner.InterpolateFaceVarying(lvl, srcFVarUV, dstFVarUV, 0);
+
+        srcFVarUV = dstFVarUV;
+    }
+
+    vertices.clear();
+    faces.clear();
+    uvs.clear();
+
+    auto lastLevel = refiner->GetLevel(level);
+
+    auto nverts = lastLevel.GetNumVertices();
+    auto nfaces = lastLevel.GetNumFaces();
+    auto nuvs   = lastLevel.GetNumFVarValues(0);
+    auto firstOfLastVerts = vbuffer.size() - nverts;
+    auto firstOfLastUvs = refiner->GetNumFVarValuesTotal(0) - nuvs;
+
+    for (int n = 0; n < nverts; ++n)
+        vertices.push_back(vbuffer[firstOfLastVerts + n]);
+
+    for (int n = 0; n < nuvs; ++n)
+        uvs.push_back(uvbuffer[firstOfLastUvs + n].uv);
+
+    for (int n = 0; n < nfaces; ++n) {
+        std::vector<FaceVertex> vs;
+        auto verts = lastLevel.GetFaceVertices(n);
+        auto vuvs = lastLevel.GetFaceFVarValues(n, 0);
+        assert(verts.size() == vuvs.size());
+        for (int i = 0; i < verts.size(); ++i)
+            vs.push_back({ .vertex = (VertexId) verts[i], .uv = (UvId) vuvs[i] });
+        faces.push_back({ .vertices = std::move(vs) });
+    }
+
+    #if 0
+    {
+        Far::TopologyLevel const & refLastLevel = refiner->GetLevel(level);
+
+        auto nverts = refLastLevel.GetNumVertices();
+        auto nfaces = refLastLevel.GetNumFaces();
+
+        auto firstOfLastVerts = vbuffer.size() - nverts;
+
+    }
+    #endif
 }
 
-Mesh readObj(const std::string & path)
+Mesh Mesh::fromObj(const std::string & path)
 {
     auto fs = std::fstream(path, std::fstream::in);
     if (!fs) throw std::runtime_error("cannot open file");
@@ -118,6 +522,102 @@ Mesh readObj(const std::string & path)
     mesh.triangulate();
 
     std::cerr << "number of tris: " << mesh.faces.size() << "\n";
+
+    return mesh;
+}
+
+void Mesh::writeObj(std::ostream & str)
+{
+    std::cerr << "Writing obj...\n";
+
+    for (auto & vert : vertices)
+        str << fmt::format("v {} {} {}\n", (float) vert.pos.x, (float) vert.pos.y, (float) vert.pos.z);
+
+    for (auto & uv : uvs)
+        str << fmt::format("vt {} {}\n", (float) uv.x, (float) uv.y);
+
+    for (auto & face : faces) {
+        str << "f ";
+        for (auto & vert : face.vertices)
+            str << (vert.vertex + 1) << "/" << (vert.uv + 1) << " ";
+        str << "\n";
+    }
+
+    // FIXME: uvs
+}
+
+nlohmann::json readJSON(const std::string & path)
+{
+    auto fs = std::fstream(path, std::fstream::in);
+    if (!fs) throw std::runtime_error("cannot open file");
+
+    unsigned char magic[2];
+    fs.read((char *) magic, sizeof(magic));
+    fs.seekg(0, fs.beg);
+
+    if (magic[0] == 0x1f && magic[1] == 0x8b) {
+        boost::iostreams::filtering_streambuf<boost::iostreams::input> in;
+        in.push(boost::iostreams::gzip_decompressor());
+        in.push(fs);
+        std::istream str(&in);
+        nlohmann::json json;
+        str >> json;
+        return json;
+    } else {
+        nlohmann::json json;
+        fs >> json;
+        return json;
+    }
+}
+
+template <class T>
+std::optional<typename T::mapped_type> get(const T & map, const typename T::key_type & key)
+{
+    auto i = map.find(key);
+    if (i == map.end()) return {};
+    return std::optional<typename T::mapped_type>(i->second);
+}
+
+Mesh Mesh::fromDSF(const std::string & geoFile, const std::string & uvFile)
+{
+    Mesh mesh;
+
+    std::map<std::pair<FaceId, VertexId>, UvId> overrides;
+
+    {
+        auto uvMap = readJSON(uvFile)["uv_set_library"][0];
+        for (auto & uv : uvMap["uvs"]["values"]) {
+            assert(uv.size() == 2);
+            mesh.uvs.push_back({glm::dvec2(uv[0], uv[1])});
+        }
+        for (auto & p : uvMap["polygon_vertex_indices"]) {
+            assert(p.size() == 3);
+            overrides.insert_or_assign({p[0], p[1]}, p[2]);
+        }
+    }
+
+    auto geometry = readJSON(geoFile)["geometry_library"][0];
+
+    for (auto & vertex : geometry["vertices"]["values"]) {
+        assert(vertex.size() == 3);
+        mesh.vertices.push_back({glm::dvec3(vertex[0], -(double) vertex[2], vertex[1])});
+    }
+
+    for (auto & poly : geometry["polylist"]["values"]) {
+        assert(poly.size() >= 5);
+        std::vector<FaceVertex> vertices;
+        FaceId faceIdx = mesh.faces.size();
+        for (size_t i = 2; i < poly.size(); ++i) {
+            VertexId vertexIdx = poly[i];
+            assert(vertexIdx < mesh.vertices.size());
+            auto uvIdx = get(overrides, {faceIdx, vertexIdx}).value_or(vertexIdx);
+            vertices.push_back({ .vertex = vertexIdx, .uv = uvIdx });
+        }
+        mesh.faces.push_back({ .vertices = std::move(vertices) });
+    }
+
+    std::cerr << fmt::format("Read {}: {} vertices, {} faces, {} UVs\n",
+        geoFile, mesh.vertices.size(), mesh.faces.size(), mesh.uvs.size());
 
     return mesh;
 }
@@ -467,7 +967,7 @@ void writeDiff(const MeshDiff & diff, const std::string & outPrefix)
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        std::cerr << fmt::format("rendering tile {}...\n", tile);
+        std::cerr << fmt::format("Rendering tile {}...\n", tile);
 
         glDrawArrays(GL_TRIANGLES, 0, diff.triangles.size() * 3);
 
@@ -483,39 +983,122 @@ void writeDiff(const MeshDiff & diff, const std::string & outPrefix)
         asyncs.push_back(std::async(std::launch::async, writePNG, tile, std::move(data)));
     }
 
-    std::cerr << fmt::format("waiting...\n");
+    std::cerr << fmt::format("Waiting...\n");
     for (auto & async : asyncs)
         async.get();
+}
+
+void applyMorphs(Mesh & mesh, size_t nrPaths, char * paths[])
+{
+    std::vector<std::pair<double, Dhdm>> dhdms;
+
+    for (size_t i = 0; i < nrPaths; ++i) {
+        std::string fn = paths[i];
+        double weight = 1.0;
+        auto c = fn.find('=');
+        if (c != fn.npos) {
+            weight = stod(fn.substr(c + 1));
+            fn = std::string(fn, 0, c);
+        }
+
+        if (fn.size() >= 4 && std::string(fn, fn.size() - 4) == ".dsf") {
+            std::cerr << fmt::format("Applying morph '{}'...\n", fn);
+            auto morph = readJSON(fn)["modifier_library"][0]["morph"];
+            int32_t vertexCount = morph["vertex_count"];
+            if (vertexCount != -1 && (size_t) vertexCount != mesh.vertices.size())
+                throw std::runtime_error(
+                    fmt::format("Morph vertex count {} differs from base mesh vertex count {}.",
+                        vertexCount,
+                        mesh.vertices.size()));
+            for (auto v : morph["deltas"]["values"])
+                mesh.vertices[v[0]].pos += weight * glm::dvec3(v[1], -(double) v[3], v[2]);
+            if (morph.find("hd_url") != morph.end()) {
+                dhdms.push_back({weight, Dhdm(fn.substr(0, fn.size() - 4) + ".dhdm")});
+                //dhdms.push_back({weight, Dhdm(percentDecode((std::string) morph["hd_url"]))});
+            }
+        } else {
+            dhdms.push_back({weight, Dhdm(fn)});
+        }
+    }
+
+    mesh.subdivide(4, dhdms);
 }
 
 int main(int argc, char * * argv)
 {
     try {
-        if (argc < 4)
-            throw std::runtime_error("syntax: dhdm out-prefix base.obj <morph.obj[=weight]...>");
 
-        std::string outPrefix = argv[1];
+        if (argc < 2)
+            throw std::runtime_error(
+                "Syntax: dhdm morphs-to-displacement <prefix> <base-mesh>.dsf <uv-map>.dsf [<morph>.[dsf|dhdm][=weight]]...\n"
+                "           | morphs-to-obj <base-mesh>.dsf <uv-map>.dsf [<morph>.[dsf|dhdm][=weight]]... > dest.obj\n"
+                "           | diff-objs <prefix> <base-mesh>.obj [<mesh>.obj[=weight]]...\n");
 
-        auto baseMeshFut = std::async(std::launch::async, &readObj, argv[2]);
-        std::vector<std::pair<double, std::future<Mesh>>> morphMeshFuts;
-        for (auto i = 3; i < argc; ++i) {
-            std::string fn = argv[i];
-            double weight = 1.0;
-            auto c = fn.find('=');
-            if (c != fn.npos) {
-                weight = stod(fn.substr(c + 1));
-                fn = std::string(fn, 0, c);
-            }
-            morphMeshFuts.push_back({weight, std::async(std::launch::async, &readObj, fn)});
+        std::string verb = argv[1];
+
+        if (verb == "morphs-to-displacement") {
+            if (argc < 5)
+                throw std::runtime_error("Missing arguments.");
+
+            std::string prefix = argv[2];
+            std::string baseMeshPath = argv[3];
+            std::string uvMapPath = argv[4];
+
+            auto baseMesh = Mesh::fromDSF(baseMeshPath, uvMapPath);
+            auto finalMesh = baseMesh;
+            applyMorphs(finalMesh, argc - 5, argv + 5);
+
+            baseMesh.subdivide(4, {});
+
+            baseMesh.triangulate();
+            finalMesh.triangulate();
+
+            auto diff = diffMeshes(1.0, baseMesh, {{1.0, std::move(finalMesh)}});
+
+            writeDiff(diff, prefix);
         }
-        auto baseMesh = baseMeshFut.get();
-        std::vector<std::pair<double, Mesh>> morphMeshes;
-        for (auto & [weight, fut] : morphMeshFuts)
-            morphMeshes.push_back({weight, fut.get()});
 
-        auto diff = diffMeshes(1.0, baseMesh, morphMeshes);
+        else if (verb == "morphs-to-obj") {
+            if (argc < 4)
+                throw std::runtime_error("Missing arguments.");
 
-        writeDiff(diff, outPrefix);
+            std::string baseMeshPath = argv[2];
+            std::string uvMapPath = argv[3];
+
+            auto baseMesh = Mesh::fromDSF(baseMeshPath, uvMapPath);
+            applyMorphs(baseMesh, argc - 4, argv + 4);
+            baseMesh.writeObj(std::cout);
+        }
+
+        else if (verb == "diff-objs") {
+
+            std::string prefix = argv[2];
+            std::string baseMeshPath = argv[3];
+
+            auto baseMeshFut = std::async(std::launch::async, &Mesh::fromObj, baseMeshPath);
+            std::vector<std::pair<double, std::future<Mesh>>> morphMeshFuts;
+            for (auto i = 4; i < argc; ++i) {
+                std::string fn = argv[i];
+                double weight = 1.0;
+                auto c = fn.find('=');
+                if (c != fn.npos) {
+                    weight = stod(fn.substr(c + 1));
+                    fn = std::string(fn, 0, c);
+                }
+                morphMeshFuts.push_back({weight, std::async(std::launch::async, &Mesh::fromObj, fn)});
+            }
+            auto baseMesh = baseMeshFut.get();
+            std::vector<std::pair<double, Mesh>> morphMeshes;
+            for (auto & [weight, fut] : morphMeshFuts)
+                morphMeshes.push_back({weight, fut.get()});
+
+            auto diff = diffMeshes(1.0, baseMesh, morphMeshes);
+
+            writeDiff(diff, prefix);
+        }
+
+        else
+            throw std::runtime_error(fmt::format("Unknown command '{}'.", verb));
 
         return 0;
     } catch (std::exception & e) {

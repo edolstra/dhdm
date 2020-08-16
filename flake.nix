@@ -7,7 +7,7 @@
       with import nixpkgs { system = "x86_64-linux"; };
       stdenv.mkDerivation {
         name = "dhdm";
-        buildInputs = [ mesa_glu glew glfw libpng glm fmt ];
+        buildInputs = [ mesa_glu glew glfw libpng glm fmt nlohmann_json opensubdiv boost ];
         src = self;
         installPhase = "mkdir -p $out/bin; cp dhdm $out/bin/";
       };
