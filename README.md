@@ -138,8 +138,14 @@ Make sure of the following:
   displacement maps.
 
 * Ideally, Blender would have multiresolution shape keys so we
-  wouldn't need to encode this stuff as images.
+  wouldn't need to encode this stuff as vector displacement maps. On
+  the other hand, maps can be useful in some cases (e.g. you can make
+  certain changes easily using an image editor).
 
 * The dhdm file format is undocumented. For the format, see
-  [dhdm.cc](/src/dhdm.cc). I've had to guess at some details, like the
-  precise basis vectors used for the displacements.
+  [dhdm.cc](/src/dhdm.cc). It's a fairly simple format: for each level
+  of displacement, it specifies a number of
+  [*edits*](http://graphics.pixar.com/opensubdiv/docs/far_overview.html#far-stenciltable)
+  to vertices of the faces resulting from subdivision. However, I've
+  had to guess at some details, like the precise basis vectors used
+  for the displacements.
