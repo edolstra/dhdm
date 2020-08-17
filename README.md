@@ -47,8 +47,8 @@ For example:
 ```
 
 generates files named `displacement-{0,1,2,...}.png` that encode the
-displacements given by the HD morphs 'fhmolympia8_hdlv4.dhdm',
-'fbmolympia8_hdlv4.dhdm' and 'vas forehead basic.dsf', where the first
+displacements given by the HD morphs `fhmolympia8_hdlv4.dhdm`,
+`fbmolympia8_hdlv4.dhdm` and `vas forehead basic.dsf`, where the first
 two have a strength of 100% and the last one has a strength of
 50%. Each file corresponds to a UV tile; specifically,
 `<prefix>-<N>.png` contains the UV faces with *u*-coordinates between
