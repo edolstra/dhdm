@@ -131,5 +131,11 @@ Make sure of the following:
   (The *Geometry/Normal* node is strictly speaking not needed here,
   since it's the default if the *Normal* input is not hooked up.)
 
-Note: while it might be nice to use the Displacement modifier, it
-currently does not support tangent-space displacement maps.
+# Notes
+
+* While it might be nice to use the Displacement modifier (since it
+  would work with Eevee), it currently does not support tangent-space
+  displacement maps.
+
+* Ideally, Blender would have multiresolution shape keys so we
+  wouldn't need to encode this stuff as images.
