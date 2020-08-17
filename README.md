@@ -5,7 +5,7 @@ in Blender.
 **Example**: left is a render with bump mapping but no displacement
   mapping; right is a render with both bump and displacement mapping.
 
-![No displacement](no-displacement.png) ![With displacement](displacement.png)
+![No displacement](doc/no-displacement.png) ![With displacement](doc/displacement.png)
 
 # Building / Running
 
