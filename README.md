@@ -139,3 +139,7 @@ Make sure of the following:
 
 * Ideally, Blender would have multiresolution shape keys so we
   wouldn't need to encode this stuff as images.
+
+* The dhdm file format is undocumented. For the format, see
+  [dhdm.cc](/src/dhdm.cc). I've had to guess at some details, like the
+  precise basis vectors used for the displacements.
