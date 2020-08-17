@@ -39,8 +39,8 @@ For example:
 ```
 
 generates files named `displacement-{0,1,2,...}.png` that encode the
-displacements given by the HD morphs 'fhmolympia8_hdlv4.dhdm',
-'fbmolympia8_hdlv4.dhdm' and 'vas forehead basic.dsf', where the first
+displacements given by the HD morphs `fhmolympia8_hdlv4.dhdm`,
+`fbmolympia8_hdlv4.dhdm` and `vas forehead basic.dsf`, where the first
 two have a strength of 100% and the last one has a strength of
 50%. Each file corresponds to a UV tile; specifically,
 `<prefix>-<N>.png` contains the UV faces with *u*-coordinates between
@@ -97,12 +97,14 @@ Make sure of the following:
   tiles. But if you have e.g. a single material, you'll need to mess
   around with Mapping nodes etc.
 
-* Under the material's *Settings*, set *Displacement* to *Displacement
-  and Bump* or *Displacement Only* to get true displacement.
+* Under the material's *Settings*, set *Displacement* to
+  **Displacement and Bump** or **Displacement Only** to get true
+  displacement.
 
 * Add a subdivision modifier with either a sufficient number of
   subdivision levels to get the necessary geometry for displacement to
-  work on (e.g. 3 or 4), or set it to "Adaptive".
+  work on (e.g. 3 or 4), or set it to **Adaptive**. The latter tends
+  to use a lot of memory, especially for high-resolution renders.
 
 * **Important**: Don't use normal maps in conjunction with vector
   displacement unless you know what you're doing! At least as of
@@ -117,3 +119,25 @@ Make sure of the following:
   bump maps on top of vector displacement maps as follows:
 
   ![Bump mapping node setup](/doc/bump-setup.png)
+
+  (The *Geometry/Normal* node is strictly speaking not needed here,
+  since it's the default if the *Normal* input is not hooked up.)
+
+# Notes
+
+* While it might be nice to use the Displacement modifier (since it
+  would work with Eevee), it currently does not support tangent-space
+  displacement maps.
+
+* Ideally, Blender would have multiresolution shape keys so we
+  wouldn't need to encode this stuff as vector displacement maps. On
+  the other hand, maps can be useful in some cases (e.g. you can make
+  certain changes easily using an image editor).
+
+* The dhdm file format is undocumented. For the format, see
+  [dhdm.cc](/src/dhdm.cc). It's a fairly simple format: for each level
+  of displacement, it specifies a number of
+  [*edits*](http://graphics.pixar.com/opensubdiv/docs/far_overview.html#far-stenciltable)
+  to vertices of the faces resulting from subdivision. However, I've
+  had to guess at some details, like the precise basis vectors used
+  for the displacements.
