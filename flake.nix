@@ -9,7 +9,9 @@
         name = "dhdm";
         buildInputs = [ mesa_glu glew glfw libpng glm fmt nlohmann_json opensubdiv boost ];
         src = self;
+        preBuild = "cd src";
         installPhase = "mkdir -p $out/bin; cp dhdm $out/bin/";
+        enableParallelBuilding = true;
       };
 
   };
