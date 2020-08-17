@@ -36,11 +36,13 @@ int main(int argc, char * * argv)
 {
     try {
 
-        if (argc < 2)
-            throw std::runtime_error(
+        if (argc < 2) {
+            std::cerr <<
                 "Syntax: dhdm morphs-to-displacement <prefix> <base-mesh>.dsf <uv-map>.dsf [<morph>.[dsf|dhdm][=weight]]...\n"
                 "           | morphs-to-obj <base-mesh>.dsf <uv-map>.dsf [<morph>.[dsf|dhdm][=weight]]... > dest.obj\n"
-                "           | diff-objs <prefix> <base-mesh>.obj [<mesh>.obj[=weight]]...\n");
+                "           | diff-objs <prefix> <base-mesh>.obj [<mesh>.obj[=weight]]...\n";
+            return 1;
+        }
 
         std::string verb = argv[1];
 
