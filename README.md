@@ -105,12 +105,14 @@ Make sure of the following:
   tiles. But if you have e.g. a single material, you'll need to mess
   around with Mapping nodes etc.
 
-* Under the material's *Settings*, set *Displacement* to *Displacement
-  and Bump* or *Displacement Only* to get true displacement.
+* Under the material's *Settings*, set *Displacement* to
+  **Displacement and Bump** or **Displacement Only** to get true
+  displacement.
 
 * Add a subdivision modifier with either a sufficient number of
   subdivision levels to get the necessary geometry for displacement to
-  work on (e.g. 3 or 4), or set it to "Adaptive".
+  work on (e.g. 3 or 4), or set it to **Adaptive**. The latter tends
+  to use a lot of memory, especially for high-resolution renders.
 
 * **Important**: Don't use normal maps in conjunction with vector
   displacement unless you know what you're doing! At least as of
