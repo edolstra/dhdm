@@ -38,9 +38,9 @@ int main(int argc, char * * argv)
 
         if (argc < 2) {
             std::cerr <<
-                "Syntax: dhdm morphs-to-displacement <prefix> <base-mesh>.dsf <uv-map>.dsf [<morph>.[dsf|dhdm][=weight]]...\n"
-                "           | morphs-to-obj <base-mesh>.dsf <uv-map>.dsf [<morph>.[dsf|dhdm][=weight]]... > dest.obj\n"
-                "           | diff-objs <prefix> <base-mesh>.obj [<mesh>.obj[=weight]]...\n";
+                "Syntax: dhdm morphs-to-displacement <prefix> <base-mesh>.dsf <uv-map>.dsf [<morph>.[dsf|dhdm][=strength]]...\n"
+                "           | morphs-to-obj <base-mesh>.dsf <uv-map>.dsf [<morph>.[dsf|dhdm][=strength]]... > dest.obj\n"
+                "           | diff-objs <prefix> <base-mesh>.obj [<mesh>.obj[=strength]]...\n";
             return 1;
         }
 
