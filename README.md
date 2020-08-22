@@ -2,13 +2,16 @@ This is a tool to convert .dhdm files (HD Morphs) to tangent-space
 displacement maps (encoded as 16-bit precision PNGs) that can be used
 in Blender.
 
-**Example**: left is a render with bump mapping but no displacement
-  mapping; right is a render with both bump and displacement mapping.
+**Example**: from left to right: a base mesh, a mesh with a vector
+displacement map applied, and a mesh with both a vector displacement
+and bump map applied.
 
-<p align="middle">
-  <img src="/doc/no-displacement.jpg" width="40%" />
-  <img src="/doc/displacement.jpg" width="40%" />
-</p>
+<table>
+<td align="center" width="30%"><img src="/doc/base-mesh.jpg"/><br><em>Base mesh</em></td>
+<td align="center" width="30%"><img src="/doc/displacement-only.jpg"/><em>Vector displacement</em></td>
+<td align="center" width="30%"><img src="/doc/displacement+bump.jpg"/><em>Vector displacement + bump</em></td>
+</table>
+
 
 # Building / Running
 
