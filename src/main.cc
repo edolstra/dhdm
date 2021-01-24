@@ -9,9 +9,10 @@
 
 #include <fmt/core.h>
 
-void applyMorphs(Mesh & mesh, size_t nrPaths, char * paths[])
+unsigned int applyMorphs(Mesh & mesh, size_t nrPaths, char * paths[])
 {
     std::vector<std::pair<double, Dhdm>> dhdms;
+    unsigned int level = 1;
 
     for (size_t i = 0; i < nrPaths; ++i) {
         std::string fn = paths[i];
@@ -25,11 +26,16 @@ void applyMorphs(Mesh & mesh, size_t nrPaths, char * paths[])
         if (fn.size() >= 4 && std::string(fn, fn.size() - 4) == ".dsf") {
             if (auto dhdm = mesh.applyMorph(weight, fn))
                 dhdms.push_back({weight, Dhdm(*dhdm)});
-        } else
-            dhdms.push_back({weight, Dhdm(fn)});
+        } else {
+            auto dhdm = Dhdm(fn);
+            level = std::max(level, (unsigned int) dhdm.levels.size());
+            dhdms.push_back({weight, std::move(dhdm)});
+        }
     }
 
-    mesh.subdivide(4, dhdms);
+    mesh.subdivide(level, dhdms);
+
+    return level;
 }
 
 int main(int argc, char * * argv)
@@ -56,10 +62,11 @@ int main(int argc, char * * argv)
 
             auto baseMesh = Mesh::fromDSF(baseMeshPath, uvMapPath);
             auto finalMesh = baseMesh;
-            applyMorphs(finalMesh, argc - 5, argv + 5);
+            auto level = applyMorphs(finalMesh, argc - 5, argv + 5);
 
-            baseMesh.subdivide(4, {});
+            baseMesh.subdivide(level, {});
 
+            std::cerr << fmt::format("Triangulating...\n");
             baseMesh.triangulate();
             finalMesh.triangulate();
 
