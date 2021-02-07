@@ -122,6 +122,17 @@ void MeshDiff::writeToPNG(const std::string & outPrefix)
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texColorBuffer, 0);
 
+    GLuint renderBuffer;
+    glGenRenderbuffers(1, &renderBuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, renderBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, width);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, renderBuffer);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        throw std::runtime_error("Framebuffer is not complete.");
+    glDisable(GL_DEPTH_TEST);
+
+    glViewport(0, 0, width, width);
+
 
     struct Pixel
     {
@@ -232,7 +243,8 @@ void MeshDiff::writeToPNG(const std::string & outPrefix)
 
         std::vector<Pixel> data(width * width);
         glReadBuffer(GL_COLOR_ATTACHMENT0);
-        glReadnPixels(0, 0, width, width, GL_RGB, GL_UNSIGNED_SHORT, data.size() * sizeof(Pixel), data.data());
+        //glReadnPixels(0, 0, width, width, GL_RGB, GL_UNSIGNED_SHORT, data.size() * sizeof(Pixel), data.data());
+        glReadPixels(0, 0, width, width, GL_RGB, GL_UNSIGNED_SHORT, data.data());
 
         if (auto err = glGetError())
             throw std::runtime_error("GL error: " + std::to_string(err));
