@@ -5,6 +5,8 @@
 
 #include <glm/gtx/normal.hpp>
 
+#include <fmt/core.h>
+
 MeshDiff MeshDiff::create(
     double scale,
     const Mesh & baseMesh,
@@ -71,7 +73,7 @@ MeshDiff MeshDiff::create(
 
     MeshDiff diff;
 
-    double maxDispl = 0.0;
+    double maxDisplPos = 0.0, maxDisplNeg = 0.0;
 
     auto toVertex = [&](glm::dvec3 tangent, glm::dvec3 bitangent, const glm::dvec3 & normal, const glm::dvec3 & displ, const glm::dvec2 & uv)
     {
@@ -90,10 +92,12 @@ MeshDiff MeshDiff::create(
 
         glm::dvec3 displ2 = mat * displ;
 
-        auto max = std::max(abs(displ2.x), std::max(abs(displ2.y), abs(displ2.z)));
-        maxDispl = std::max(maxDispl, max);
+        auto maxPos = std::max(displ2.x, std::max(displ2.y, displ2.z));
+        maxDisplPos = std::max(maxDisplPos, maxPos);
+        auto maxNeg = std::min(displ2.x, std::min(displ2.y, displ2.z));
+        maxDisplNeg = std::min(maxDisplNeg, maxNeg);
 
-        if (max > 1e-6) {
+        if (std::max(maxPos, abs(maxPos)) > 1e-6) {
             unsigned int tile = uv.x / 1.0;
             diff.tiles.insert(tile);
         }
@@ -134,8 +138,9 @@ MeshDiff MeshDiff::create(
             });
     }
 
-    std::cerr << "Maximum displacement: " << maxDispl << "\n";
-    std::cerr << "Maximum pixel component value: " << (maxDispl * scale + 0.5) * 255.0 << "\n";
+    std::cerr << fmt::format("Maximum displacement: {}\n", std::max(maxDisplPos, abs(maxDisplNeg)));
+    std::cerr << fmt::format("Most positive pixel component value: {}\n", (maxDisplPos * scale + 0.5) * 255.0);
+    std::cerr << fmt::format("Most negative pixel component value: {}\n", (maxDisplNeg * scale + 0.5) * 255.0);
 
     return diff;
 }
