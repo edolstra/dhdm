@@ -97,7 +97,7 @@ MeshDiff MeshDiff::create(
         auto maxNeg = std::min(displ2.x, std::min(displ2.y, displ2.z));
         maxDisplNeg = std::min(maxDisplNeg, maxNeg);
 
-        if (std::max(maxPos, abs(maxPos)) > 1e-6) {
+        if (std::max(maxPos, abs(maxNeg)) > 1e-6) {
             unsigned int tile = uv.x / 1.0;
             diff.tiles.insert(tile);
         }
