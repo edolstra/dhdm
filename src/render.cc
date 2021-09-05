@@ -143,42 +143,45 @@ void MeshDiff::writeToPNG(const std::string & outPrefix)
 
     auto writePNG = [&](unsigned int tile, std::vector<Pixel> data)
     {
-        /* Blur uninitialized pixels by averaging adjacent initialized
-           pixels. */
-        for (int x = 0; x < width; x++)
-            for (int y = 0; y < width; y++) {
-                auto & pixel = data[y * width + x];
-                if (pixel.r == 0 && pixel.g == 0 && pixel.b == 0) {
-                    uint32_t r = 0, g = 0, b = 0;
-                    unsigned int c = 0;
-                    auto read = [&](int x, int y)
-                    {
-                        if (x >= 0 && x < width && y >= 0 && y < width) {
-                            auto & pixel2 = data[y * width + x];
-                            if (pixel2.r != 0 || pixel2.g != 0 || pixel2.b != 0) {
-                                r += pixel2.r;
-                                g += pixel2.g;
-                                b += pixel2.b;
-                                c++;
+        /* Create a margin around each UV island. */
+        std::cerr << fmt::format("Extending tile {}...\n", tile);
+        for (int n = 0; n < 16; n++) {
+            std::vector<std::pair<Pixel *, Pixel>> newPixels;
+
+            for (int x = 0; x < width; x++)
+                for (int y = 0; y < width; y++) {
+                    auto & pixel = data[y * width + x];
+                    if (pixel.r == 0 && pixel.g == 0 && pixel.b == 0) {
+                        uint32_t r = 0, g = 0, b = 0;
+                        unsigned int c = 0;
+                        auto read = [&](int x, int y)
+                        {
+                            if (x >= 0 && x < width && y >= 0 && y < width) {
+                                auto & pixel2 = data[y * width + x];
+                                if (pixel2.r != 0 || pixel2.g != 0 || pixel2.b != 0) {
+                                    r += pixel2.r;
+                                    g += pixel2.g;
+                                    b += pixel2.b;
+                                    c++;
+                                }
                             }
-                        }
-                    };
-                    read(x - 1, y - 1);
-                    read(x,     y - 1);
-                    read(x + 1, y - 1);
-                    read(x - 1, y);
-                    read(x + 1, y);
-                    read(x - 1, y + 1);
-                    read(x,     y + 1);
-                    read(x + 1, y + 1);
-                    if (c) {
-                        //std::cerr << fmt::format("FIX {} {} {}", x, y, c);
-                        pixel.r = r / c;
-                        pixel.g = g / c;
-                        pixel.b = b / c;
+                        };
+                        read(x - 1, y - 1);
+                        read(x,     y - 1);
+                        read(x + 1, y - 1);
+                        read(x - 1, y);
+                        read(x + 1, y);
+                        read(x - 1, y + 1);
+                        read(x,     y + 1);
+                        read(x + 1, y + 1);
+                        if (c)
+                            newPixels.push_back({&pixel, {(uint16_t) (r / c), (uint16_t) (g / c), (uint16_t) (b / c) }});
                     }
                 }
-            }
+
+            for (auto & [ptr, pixel] : newPixels)
+                *ptr = pixel;
+        }
 
         for (int x = 0; x < width; x++)
             for (int y = 0; y < width; y++) {
