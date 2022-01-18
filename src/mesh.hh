@@ -6,6 +6,7 @@
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/mat3x3.hpp>
 
 struct Dhdm;
 
@@ -57,4 +58,12 @@ struct Mesh
     static Mesh fromDSF(const std::string & geoFile, const std::string & uvFile);
 
     std::optional<std::string> applyMorph(double weight, const std::string & dsfFile);
+
+    struct DhdmMats
+    {
+        std::vector<std::vector<glm::dmat3x3>> mats;
+        std::vector<size_t> subfaceOffsets;
+    };
+
+    DhdmMats calcDhdmMats();
 };

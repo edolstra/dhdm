@@ -13,6 +13,41 @@
 #include <opensubdiv/far/stencilTable.h>
 #include <opensubdiv/far/stencilTableFactory.h>
 
+Mesh::DhdmMats Mesh::calcDhdmMats()
+{
+    DhdmMats res;
+    size_t subfaceOffset = 0;
+
+    for (auto & face : faces) {
+        auto nrVerts = face.vertices.size();
+        assert(nrVerts >= 3);
+
+        res.subfaceOffsets.push_back(subfaceOffset);
+        subfaceOffset += nrVerts;
+
+        std::vector<glm::dvec3> verts;
+        for (size_t i = 0; i < nrVerts; i++)
+            verts.push_back(vertices[face.vertices[i].vertex].pos);
+
+        std::vector<glm::dmat3x3> faceMats;
+        glm::dvec3 z_axis = glm::normalize(
+            glm::cross(
+                verts[1] - verts[0],
+                verts[nrVerts - 1] - verts[0]));
+
+        for (size_t i = 0; i < nrVerts; i++) {
+            auto prev = i > 0 ? i - 1 : nrVerts - 1;
+            auto x_axis = glm::normalize(verts[prev] - verts[i]);
+            auto y_axis = glm::normalize(glm::cross(z_axis, x_axis));
+            faceMats.push_back(glm::dmat3x3(x_axis, z_axis, -y_axis));
+        }
+
+        res.mats.push_back(std::move(faceMats));
+    }
+
+    return res;
+}
+
 void Mesh::subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dhdms)
 {
     if (level == 0) return;
@@ -29,10 +64,11 @@ void Mesh::subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dh
     options.SetVtxBoundaryInterpolation(Sdc::Options::VTX_BOUNDARY_EDGE_ONLY);
     options.SetFVarLinearInterpolation(Sdc::Options::FVAR_LINEAR_CORNERS_ONLY);
 
+    auto mats = calcDhdmMats();
+
     std::vector<int> vertsPerFace;
     std::vector<int> vertIndices;
     std::vector<int> uvIndices;
-    std::vector<glm::dmat3x3> mats;
 
     for (auto & face : faces) {
         vertsPerFace.push_back(face.vertices.size());
@@ -40,13 +76,6 @@ void Mesh::subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dh
             vertIndices.push_back(vert.vertex);
             uvIndices.push_back(vert.uv);
         }
-
-        assert(face.vertices.size() == 4);
-
-        auto x_axis = glm::normalize(vertices[face.vertices[3].vertex].pos - vertices[face.vertices[0].vertex].pos);
-        auto z_axis = glm::normalize(vertices[face.vertices[1].vertex].pos - vertices[face.vertices[0].vertex].pos);
-        auto y_axis = -glm::normalize(glm::cross(x_axis, z_axis));
-        mats.push_back(glm::dmat3x3(x_axis, y_axis, z_axis));
     }
 
     Descriptor::FVarChannel uvChannel;
@@ -123,17 +152,22 @@ void Mesh::subdivide(unsigned int level, std::vector<std::pair<double, Dhdm>> dh
 
         const auto & curLevel = refiner->GetLevel(lvl);
         uint32_t nrSubfaces = curLevel.GetNumFaces();
+        auto subFaceOffsetFactor = 1 << ((lvl - 1) * 2);
 
         for (auto & [weight, edits] : dhdms) {
             if (lvl <= edits.levels.size()) {
                 for (auto displ : edits.levels[lvl - 1]) {
-                    auto subfaceIdx = displ.faceIdx * (1 << (lvl * 2)) + displ.subfaceIdx;
+                    auto subfaceIdx = mats.subfaceOffsets[displ.faceIdx] * subFaceOffsetFactor + displ.subfaceIdx;
                     assert(subfaceIdx < nrSubfaces);
                     auto fverts = curLevel.GetFaceVertices(subfaceIdx);
                     assert(displ.vertexIdx < fverts.size());
                     auto vertexIdx = fverts[displ.vertexIdx] + start;
                     assert(vertexIdx < vbuffer.size());
-                    vbuffer[vertexIdx].pos += weight * mats[displ.faceIdx] * glm::dvec3(displ.x, displ.y, displ.z);
+                    uint32_t submatIdx = displ.subfaceIdx / subFaceOffsetFactor;
+                    vbuffer[vertexIdx].pos +=
+                        weight
+                        * mats.mats[displ.faceIdx][submatIdx]
+                        * glm::dvec3(displ.x, displ.y, displ.z);
                 }
             }
         }
